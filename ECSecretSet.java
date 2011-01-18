@@ -1,7 +1,7 @@
 import java.util.ArrayList;
 import java.util.Random;
 
-public class ECSecretSet
+class ECSecretSet
 {
     private long d[];
 
@@ -39,10 +39,11 @@ class MulECDSA
     private long n;
     private ECSecretSet d1;
     private ECSecretSet d2;
+    private ECParam param;
 
     public MulECDSA()
     {
-        this( 2011, 5 );
+        this( Cnst.DEFAULT_MOD, Cnst.DEFAULT_SECRET_NUM );
     }
     
     public MulECDSA(long n, int secretNum)
@@ -51,38 +52,9 @@ class MulECDSA
         this.n = n;
         d1 = new ECSecretSet( secretNum, n);
         d2 = new ECSecretSet( secretNum, n);
+        param = new ECParam();
     }
 
-    private long calcEEA( long a, long b )
-    {
-        // Start EEA
-        long alpha = 0;
-        long beta = 1;
-
-        long lastA = 1;
-        long lastB = 0;
-
-        while( b != 0 ) {
-            long quotient = a/b;
-
-            // (t, n) = ( n, t mod n )
-            long tmp = a;
-            a = b;
-            b = tmp % b;
-
-            // (alpha, lastA) = ( lastA - quotient*alpha, alpha )
-            tmp = lastA;
-            lastA = alpha;
-            alpha = tmp - ( quotient * alpha );
-
-            // (beta, lastB) = ( lastB - quotient*beta, beta )
-            tmp = lastB;
-            lastB = beta;
-            beta = tmp - ( quotient * alpha );
-        }
-
-        return lastA;
-    }
     
 }
 
@@ -115,10 +87,43 @@ class MulECDSASig
 
 class ECParam
 {
+    // Parameter of Elliptic Curve y^2 mod n = x^3 + ax + b mod n
+    // constraint: 4a^3 + 27b^2 mod n != 0
+    private long a;
+    private long b;
+    private long n;
 
+    public ECParam()
+    {
+        this( Cnst.DEFAULT_A, Cnst.DEFAULT_B, Cnst.DEFAULT_MOD );
+    }
 
-
-
+    public ECParam( long a, long b, long n )
+    {
+        this.a = a;
+        this.b = b;
+        this.n = n;
+    }
+    
+    public long getA()
+    {
+        return a;
+    }
+    
+    public long getB()
+    {
+        return b;
+    }
+    
+    public long getN()
+    {
+        return n;
+    }
+    
+    public boolean equals( ECParam p )
+    {
+        return (a == p.getA()) && (b == p.getB()) && (n == p.getN());
+    }
 }
 
 class ECPoint
@@ -137,19 +142,55 @@ class ECPoint
     public ECPoint add( ECPoint point )
     {
         // check that EC points are on the same curve
+        if( !param.equals( point.getParam() ))
+            return null;
         
+        long n = param.getN();
+        long pY = point.getY();
+        long pX = point.getX();
         
+        long l = Cnst.mPos((y - pY) * Cnst.mInv(x - pX, n), n);
+        long oX = Cnst.mPos(l*l - x - pX, n);
+        long oY = Cnst.mPos( -y + l*(x - oX), n);
+        
+        return new ECPoint( oX, oY, param );
     }
     
-    public ECPoint square()
+    public ECPoint doubling()
     {
+        long n = param.getN();
+        long a = param.getA();
+
+        long l = Cnst.mPos( (3*x*x + a) * Cnst.mInv(2*y, n), n);
+        long oX = Cnst.mPos((l*l)-(2*x), n );
+        long oY = Cnst.mPos( -y + l*(x - oX), n);
         
+        return new ECPoint( oX, oY, param );
     }
     
     public ECPoint multiply( long m )
     {
+        long n = param.getN();
+        m %= n;
+        long hob = Long.highestOneBit(m);
+        ECPoint result, base;
+        result = base = new ECPoint( x, y, param );
         
+        // implement using basic double-and-add technique
+        for( int i = 0; i < hob - 1; i++ ){
+            result = result.doubling();
+            m  = Long.rotateLeft( m, 1 );
+            if( (m & hob) != 0 )
+                result = result.add( base );
+        }
         
+        return result;
+    }
+    
+    public ECPoint negative()
+    {
+        long newY = Cnst.mPos(-y, param.getN()) % param.getN();
+        return new ECPoint( x, newY, param );
     }
     
     public long getX()
@@ -169,10 +210,56 @@ class ECPoint
     
     public boolean equals( ECPoint point )
     {
-        if( param.equals( point.getParam()) &&
-            x == point.getX() && y == point.getY() )
-            return true;
-            
-        return false;
+        return (param.equals( point.getParam())) &&
+            (x == point.getX()) && (y == point.getY());
+    }
+}
+
+final class Cnst
+{
+    // Default curve parameters
+    public static final long DEFAULT_MOD = 2011;
+    public static final long DEFAULT_A = 234;
+    public static final long DEFAULT_B = 567;
+
+    public static final int DEFAULT_SECRET_NUM = 5;
+    
+    // Modulo multiplication inverse using Extended Euclidean Algorithm (EEA)
+    public static long mInv( long a, long n )
+    {
+        // Start EEA
+        long alpha = 0;
+        long beta = 1;
+
+        long lastA = 1;
+        long lastB = 0;
+
+        while( n != 0 ) {
+            long quotient = a/n;
+
+            // (t, n) = ( n, t mod n )
+            long tmp = a;
+            a = n;
+            n = tmp % n;
+
+            // (alpha, lastA) = ( lastA - quotient*alpha, alpha )
+            tmp = lastA;
+            lastA = alpha;
+            alpha = tmp - ( quotient * alpha );
+
+            // (beta, lastB) = ( lastB - quotient*beta, beta )
+            tmp = lastB;
+            lastB = beta;
+            beta = tmp - ( quotient * alpha );
+        }
+
+        return lastA;
+    }
+    
+    // Modulo positive
+    public static long mPos( long a, long n )
+    {
+        for( ; a < 0 ; a+=n );    
+        return a;
     }
 }
