@@ -85,7 +85,7 @@ class MulECDSASig
     }
 }
 
-class ECParam
+class ECParam implements Cloneable
 {
     // Parameter of Elliptic Curve y^2 mod n = x^3 + ax + b mod n
     // constraint: 4a^3 + 27b^2 mod n != 0
@@ -124,9 +124,15 @@ class ECParam
     {
         return (a == p.getA()) && (b == p.getB()) && (n == p.getN());
     }
+
+    protected Object clone() throws CloneNotSupportedException
+    {
+        ECParam clone = (ECParam)super.clone();
+        return clone;
+    }
 }
 
-class ECPoint
+class ECPoint implements Cloneable
 {
     private long x;
     private long y;
@@ -212,6 +218,13 @@ class ECPoint
     {
         return (param.equals( point.getParam())) &&
             (x == point.getX()) && (y == point.getY());
+    }
+
+    protected Object clone() throws CloneNotSupportedException
+    {
+        ECPoint clone = (ECPoint) super.clone();
+        clone.param = (ECParam) param.clone();
+        return clone;
     }
 }
 
