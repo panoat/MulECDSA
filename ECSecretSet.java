@@ -1,32 +1,32 @@
 import java.util.ArrayList;
 import java.util.Random;
+import java.math.BigInteger;
 
 class ECSecretSet
 {
-    private long d[];
+    private ArrayList<BigInteger> d;
 
-    public ECSecretSet(int num, long mod)
+    public ECSecretSet(int num, BigInteger mod)
     {
-        ArrayList<Long> aval = new ArrayList<Long>();
         Random rd = new Random();
-        d = new long[num];
+        d = new ArrayList<BigInteger>();
 
-        for( long i = 0; i < mod; i++ ) {
-            aval.add( i );
-        }
-
-        for( int i = 0; i < num; i++ ) {
-            long pick = rd.nextLong() % aval.size();
-            d[i] = aval.get((int)pick);
-            aval.remove( (int)pick );
+        int count = 0;
+        while( count < num ) {
+            // pick a random number
+            BigInteger rand = new BigInteger( mod.bitLength(), rd );
+            if( !d.contains( rand ) ) {
+                d.add(rand);
+                count++;
+            }
         }
     }
     
     public String toString()
     {
         String out = "";
-        for( int i = 0; i < d.length; i++ ) {
-            out += d[i] + "\n";
+        for( int i = 0; i < d.size(); i++ ) {
+            out += d.get(i).toString();
         }
         return out;
     }
@@ -36,17 +36,17 @@ class ECSecretSet
 class MulECDSA
 {
     // instance variables - replace the example below with your own
-    private long n;
+    private BigInteger n;
     private ECSecretSet d1;
     private ECSecretSet d2;
     private ECParam param;
 
     public MulECDSA()
     {
-        this( Cnst.DEFAULT_MOD, Cnst.DEFAULT_SECRET_NUM );
+        this( Cnst.ST192_N, Cnst.DEFAULT_SECRET_NUM );
     }
     
-    public MulECDSA(long n, int secretNum)
+    public MulECDSA(BigInteger n, int secretNum)
     {
         // initialise instance variables
         this.n = n;
@@ -55,26 +55,26 @@ class MulECDSA
         param = new ECParam();
     }
 
-    
+
 }
 
 class MulECDSASig
 {
-    private long r;
-    private long s;
+    private BigInteger r;
+    private BigInteger s;
 
-    public MulECDSASig( long r, long s )
+    public MulECDSASig( BigInteger r, BigInteger s )
     {
         this.r = r;
         this.s = s;
     }
 
-    public long getR()
+    public BigInteger getR()
     {
         return r;
     }
     
-    public long getS()
+    public BigInteger getS()
     {
         return s;
     }
@@ -89,40 +89,44 @@ class ECParam implements Cloneable
 {
     // Parameter of Elliptic Curve y^2 mod n = x^3 + ax + b mod n
     // constraint: 4a^3 + 27b^2 mod n != 0
-    private long a;
-    private long b;
-    private long n;
+    private BigInteger a;
+    private BigInteger b;
+    private BigInteger n;
+    private BigInteger gX;
+    private BigInteger gY;
 
     public ECParam()
     {
-        this( Cnst.DEFAULT_A, Cnst.DEFAULT_B, Cnst.DEFAULT_MOD );
+        this( Cnst.ST192_A, Cnst.ST192_B, Cnst.ST192_N, Cnst.ST192_GX, Cnst.ST192_GY );
     }
 
-    public ECParam( long a, long b, long n )
+    public ECParam( BigInteger a, BigInteger b, BigInteger n, BigInteger gX, BigInteger gY )
     {
         this.a = a;
         this.b = b;
         this.n = n;
+        this.gX = gX;
+        this.gY = gY;
     }
     
-    public long getA()
+    public BigInteger getA()
     {
         return a;
     }
     
-    public long getB()
+    public BigInteger getB()
     {
         return b;
     }
     
-    public long getN()
+    public BigInteger getN()
     {
         return n;
     }
     
     public boolean equals( ECParam p )
     {
-        return (a == p.getA()) && (b == p.getB()) && (n == p.getN());
+        return (a.equals(p.getA())) && (b.equals(p.getB())) && (n.equals(p.getN()));
     }
 
     protected Object clone() throws CloneNotSupportedException
@@ -134,11 +138,11 @@ class ECParam implements Cloneable
 
 class ECPoint implements Cloneable
 {
-    private long x;
-    private long y;
+    private BigInteger x;
+    private BigInteger y;
     private ECParam param;
 
-    public ECPoint( long x, long y, ECParam param )
+    public ECPoint( BigInteger x, BigInteger y, ECParam param )
     {
         this.x = x;
         this.y = y;
@@ -146,48 +150,54 @@ class ECPoint implements Cloneable
     }
     
     public ECPoint add( ECPoint point )
-    {
-        // check that EC points are on the same curve
-        if( !param.equals( point.getParam() ))
-            return null;
+    {   
+        BigInteger n = param.getN();
+        BigInteger pY = point.getY();
+        BigInteger pX = point.getX();
         
-        long n = param.getN();
-        long pY = point.getY();
-        long pX = point.getX();
-        
-        long l = Cnst.mPos((y - pY) * Cnst.mInv(x - pX, n), n);
-        long oX = Cnst.mPos(l*l - x - pX, n);
-        long oY = Cnst.mPos( -y + l*(x - oX), n);
+        //l = (y - pY)/(x - pX) mod n
+        BigInteger l = ((y.subtract(pY)).multiply(x.subtract(pX).modInverse(n))).mod(n);
+        //oX = (l^2 - x - pX) mod n
+        BigInteger oX = ((l.pow(2)).subtract(x).subtract(pX)).mod(n);
+        //oY = -y + l(x - oX) mod n;
+        BigInteger oY = ((y.negate()).add(l.multiply(x.subtract(oX)))).mod(n);
         
         return new ECPoint( oX, oY, param );
     }
     
     public ECPoint doubling()
     {
-        long n = param.getN();
-        long a = param.getA();
+        BigInteger n = param.getN();
+        BigInteger a = param.getA();
+        
+        BigInteger three = BigInteger.valueOf(3);
+        BigInteger two = BigInteger.valueOf(2);
 
-        long l = Cnst.mPos( (3*x*x + a) * Cnst.mInv(2*y, n), n);
-        long oX = Cnst.mPos((l*l)-(2*x), n );
-        long oY = Cnst.mPos( -y + l*(x - oX), n);
+        //l = (3x^2 + a)/(2y) mod n
+        BigInteger l = (((x.pow(2).multiply(three)).add(a)).multiply(y.multiply(two))).mod(n);
+        //oX = l^2 - 2x mod n
+        BigInteger oX = (l.pow(2).subtract(x.multiply(two))).mod(n);
+        //oY = -y + l(x - oX) mod n
+        BigInteger oY = ((y.negate()).add(l.multiply(x.subtract(oX)))).mod(n);
         
         return new ECPoint( oX, oY, param );
     }
     
-    public ECPoint multiply( long m )
+    public ECPoint multiply( BigInteger m )
     {
-        long n = param.getN();
-        m %= n;
-        long hob = Long.highestOneBit(m);
+        BigInteger n = param.getN();
+        m = m.mod(n);
+        int hob = m.bitLength();
         ECPoint result, base;
         result = base = new ECPoint( x, y, param );
         
         // implement using basic double-and-add technique
         for( int i = 0; i < hob - 1; i++ ){
             result = result.doubling();
-            m  = Long.rotateLeft( m, 1 );
-            if( (m & hob) != 0 )
+            m  = m.shiftLeft(1);
+            if( m.testBit(hob) ) {
                 result = result.add( base );
+            }
         }
         
         return result;
@@ -195,16 +205,16 @@ class ECPoint implements Cloneable
     
     public ECPoint negative()
     {
-        long newY = Cnst.mPos(-y, param.getN()) % param.getN();
+        BigInteger newY = (y.negate()).mod(param.getN());
         return new ECPoint( x, newY, param );
     }
     
-    public long getX()
+    public BigInteger getX()
     {
         return x;
     }
     
-    public long getY()
+    public BigInteger getY()
     {
         return y;
     }
@@ -217,7 +227,7 @@ class ECPoint implements Cloneable
     public boolean equals( ECPoint point )
     {
         return (param.equals( point.getParam())) &&
-            (x == point.getX()) && (y == point.getY());
+            (x.equals(point.getX())) && (y.equals(point.getY()));
     }
 
     protected Object clone() throws CloneNotSupportedException
@@ -230,17 +240,19 @@ class ECPoint implements Cloneable
 
 final class Cnst
 {
-    // Default curve parameters
-    public static final long DEFAULT_MOD = 2011;
-    public static final long DEFAULT_A = 234;
-    public static final long DEFAULT_B = 567;
+    // NIST standard curve P-192 parameters
+    public static final BigInteger ST192_N = new BigInteger("6277101735386680763835789423207666416083908700390324961279");
+    public static final BigInteger ST192_A = new BigInteger("-3");
+    public static final BigInteger ST192_B = new BigInteger("64210519e59c80e70fa7e9ab72243049feb8deecc146b9b1",16);
+    public static final BigInteger ST192_GX = new BigInteger("188da80eb03090f67cbf20eb43a18800f4ff0afd82ff1012",16);
+    public static final BigInteger ST192_GY = new BigInteger("07192b95ffc8da78631011ed6b24cdd573f977a11e794811",16);
 
     public static final int DEFAULT_SECRET_NUM = 5;
     
-    // Modulo multiplication inverse using Extended Euclidean Algorithm (EEA)
+    // Modulo multiplication inverse using Extended Euclidean Algorithm (XEA)
+    //**** UNUSED b/c BigInteger has built-in modInverse() method *****
     public static long mInv( long a, long n )
     {
-        // Start EEA
         long alpha = 0;
         long beta = 1;
 
@@ -270,9 +282,12 @@ final class Cnst
     }
     
     // Modulo positive
-    public static long mPos( long a, long n )
+    // **** UNUSED b/c BigInteger's mod() always return non-negative ****
+    public static BigInteger mPos( BigInteger a, BigInteger n )
     {
-        for( ; a < 0 ; a+=n );    
+        while( a.compareTo(BigInteger.ZERO) < 0 ) {
+            a = a.add(n);
+        }
         return a;
     }
 }
